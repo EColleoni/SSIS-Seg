@@ -15,7 +15,7 @@ import data
 from random import randrange
 from sim2real_models import model_cc
 from segmentation_models import model_Unet_sim2real
-
+from utils import create_path
 
 
 def predict(args):
@@ -43,9 +43,7 @@ def predict(args):
         return tf.math.add(tf.math.multiply(A, mask), tf.math.multiply(background, 1 - mask))
 
     output_dir = args.save_dir
-    
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    create_path(output_dir)
 
     # ==============================================================================
     # =                                    data                                    =
@@ -56,14 +54,12 @@ def predict(args):
 
     dataset_test, len_dataset = data.make_zip_dataset(img_paths_test, img_paths_test, args.batch_size, args.load_size, args.crop_size, training=False, repeat=False, shuffle=False)
 
-
     # ==============================================================================
     # =                                   models                                   =
     # ==============================================================================
 
     generator_A2B = tf.keras.models.load_model(args.models_dir + '/model_{}/A2B_gen_{}'.format(args.model_number, args.model_number))
     attention_A = tf.keras.models.load_model(args.models_dir + '/model_{}/A_att_{}'.format(args.model_number, args.model_number))
-
 
     # ==============================================================================
     # =                                    run                                     =
