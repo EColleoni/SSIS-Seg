@@ -1,9 +1,6 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"]="3"
 
-import sys
-sys.path.insert(1, 'sim2real/utils')
-
 import functools
 import imlib as im
 import numpy as np
@@ -20,8 +17,8 @@ import data
 import module_spectral as module
 from segmentation_models.losses import bce_jaccard_loss as attention_loss_fn
 from random import randrange, randint
-from sim2real_models import encoder_cc, generator_cc, ConvDiscriminator, ConvDiscriminator_no_spectral, ConvDiscriminator_no_spectral_25, ConvDiscriminator_dropout
-from segmentation_models import model_Unet_sim2real
+from MUNIT_model_content_spectral import model_cc, ConvDiscriminator, ConvDiscriminator_no_spectral, ConvDiscriminator_no_spectral_25, ConvDiscriminator_dropout
+from sim2real_segmentation_model import model_Unet_sim2real
 from utils import create_path
 
 # ==============================================================================
@@ -51,14 +48,14 @@ def train(args):
     # =                                    data                                    =
     # ==============================================================================
 
-    A_img_paths = py.glob(py.join(args.datasets_dir, 'trainD'), '*.png')
+    A_img_paths = py.glob(py.join(args.datasets_dir, 'trainE'), '*.png')
     B_img_paths = py.glob(py.join(args.datasets_dir, 'trainB'), '*.png')
     A_B_dataset, len_dataset = data.make_zip_dataset(A_img_paths, B_img_paths, args.batch_size, args.load_size, args.crop_size, training=True, repeat=False)
 
     A2B_pool = data.ItemPool(args.pool_size)
     B2A_pool = data.ItemPool(args.pool_size)
 
-    A_img_paths_test = py.glob(py.join(args.datasets_dir, 'trainD'), '*.png')
+    A_img_paths_test = py.glob(py.join(args.datasets_dir, 'trainE'), '*.png')
     B_img_paths_test = py.glob(py.join(args.datasets_dir, 'trainB'), '*.png')
     A_B_dataset_test, _ = data.make_zip_dataset(A_img_paths_test, B_img_paths_test, args.batch_size, args.load_size, args.crop_size, training=False, repeat=True)
 
@@ -66,11 +63,8 @@ def train(args):
     # =                                   models                                   =
     # ==============================================================================
 
-    content_encoder_A = encoder_cc(input_shape=(512, 512, 3))
-    content_encoder_B = encoder_cc(input_shape=(512, 512, 3))
-
-    generator_A = generator_cc(input_shape=(128, 128, 256))
-    generator_B = generator_cc(input_shape=(128, 128, 256))
+    generator_A2B = model_cc(input_shape_enc=(512, 512, 3), shape_dec=(128, 128, 256))
+    generator_B2A = model_cc(input_shape_enc=(512, 512, 3), shape_dec=(128, 128, 256))
 
     try:
         attention_A = model_Unet_sim2real(input_shape=(512, 512, 3))
@@ -111,12 +105,10 @@ def train(args):
     D_lr_scheduler = module.LinearDecay(args.lr * args.lrD_on_lrG, args.epochs * len_dataset, args.epoch_decay * len_dataset)
 
     # Optimizers definition
-    G_optimizer_A_enc = keras.optimizers.Adam(learning_rate=G_lr_scheduler, beta_1=args.beta_1)
-    G_optimizer_A_gen = keras.optimizers.Adam(learning_rate=G_lr_scheduler, beta_1=args.beta_1)
+    G_optimizer_A2B_gen = keras.optimizers.Adam(learning_rate=G_lr_scheduler, beta_1=args.beta_1)
     G_optimizer_A_att = keras.optimizers.Adam(learning_rate=G_lr_scheduler_att, beta_1=args.beta_1)
 
-    G_optimizer_B_enc = keras.optimizers.Adam(learning_rate=G_lr_scheduler, beta_1=args.beta_1)
-    G_optimizer_B_gen = keras.optimizers.Adam(learning_rate=G_lr_scheduler, beta_1=args.beta_1)
+    G_optimizer_B2A_gen = keras.optimizers.Adam(learning_rate=G_lr_scheduler, beta_1=args.beta_1)
     G_optimizer_B_att = keras.optimizers.Adam(learning_rate=G_lr_scheduler_att, beta_1=args.beta_1)
 
     D_optimizer_A = keras.optimizers.Adam(learning_rate=D_lr_scheduler, beta_1=args.beta_1)
@@ -128,17 +120,14 @@ def train(args):
 
     @tf.function
     def train_G(A, B, foreground_A, ep):
-        with tf.GradientTape() as t_A, tf.GradientTape() as t_B, tf.GradientTape() as t_C, tf.GradientTape() as t_D, tf.GradientTape() as t_E, tf.GradientTape() as t_F:
+        with tf.GradientTape() as t_A, tf.GradientTape() as t_B, tf.GradientTape() as t_C, tf.GradientTape() as t_D:
 
             ############################
             #      image_synthesis     #
             ############################
 
-            content_A = content_encoder_A(A)
-            content_B = content_encoder_B(B)
-
-            A2B_ = generator_B(content_A)
-            B2A_ = generator_A(content_B)
+            A2B_ = generator_A2B(A)
+            B2A_ = generator_B2A(B)
 
             att_A = attention_A(A)
             att_B = attention_B(B)
@@ -151,11 +140,8 @@ def train(args):
             A2B = tf.math.add(tf.math.multiply(A2B_, att_A), tf.math.multiply(A, 1 - att_A))
             B2A = tf.math.add(tf.math.multiply(B2A_, att_B), tf.math.multiply(B, 1 - att_B))
 
-            content_A2B = content_encoder_B(A2B)
-            content_B2A = content_encoder_A(B2A)
-
-            A2B2A_ = generator_A(content_A2B)
-            B2A2B_ = generator_B(content_B2A)
+            A2B2A_ = generator_B2A(A2B)
+            B2A2B_ = generator_A2B(B2A)
 
             att_A2B = attention_B(A2B)
             att_B2A = attention_A(B2A)
@@ -176,9 +162,6 @@ def train(args):
             A2B_adversarial_loss = g_loss_fn(A2B_d_logits)
             B2A_adversarial_loss = g_loss_fn(B2A_d_logits)
 
-            A2B_content_reconstruction_loss = reconstruction_loss_fn(content_A, content_A2B)
-            B2A_content_reconstruction_loss = reconstruction_loss_fn(content_B, content_B2A)
-
             A2B2A_cycle_loss = reconstruction_loss_fn(A, A2B2A)
             B2A2B_cycle_loss = reconstruction_loss_fn(B, B2A2B)
 
@@ -189,41 +172,33 @@ def train(args):
             att_B_loss = attention_loss_fn(att_B, att_B2A)
 
             G_loss_A = args.adversarial_loss_weight[ep] * (A2B_adversarial_loss + B2A_adversarial_loss) + \
-                    (A2B_content_reconstruction_loss + B2A_content_reconstruction_loss) * args.content_rec_loss_weight + \
                     (A2B2A_cycle_loss + B2A2B_cycle_loss) * args.cycle_loss_weight[ep] + \
                     (ssim_A2B2A_loss + ssim_B2A2B_loss) * args.ssim_loss_weight[ep]
 
             G_loss_B = args.adversarial_loss_weight[ep] * (A2B_adversarial_loss + B2A_adversarial_loss) + \
-                    (A2B_content_reconstruction_loss + B2A_content_reconstruction_loss) * args.content_rec_loss_weight + \
                     (A2B2A_cycle_loss + B2A2B_cycle_loss) * args.cycle_loss_weight[ep] + \
                     (ssim_A2B2A_loss + ssim_B2A2B_loss) * args.ssim_loss_weight[ep]
 
             G_loss_att_A = args.adversarial_loss_weight[ep] * (A2B_adversarial_loss + B2A_adversarial_loss) + \
-                    (A2B_content_reconstruction_loss + B2A_content_reconstruction_loss) * args.content_rec_loss_weight + \
                     (A2B2A_cycle_loss + B2A2B_cycle_loss) * args.cycle_loss_weight[ep] + \
                     (ssim_A2B2A_loss + ssim_B2A2B_loss) * args.ssim_loss_weight[ep] + \
                     ss_loss_A * args.sim_supervision_weight
 
             G_loss_att_B = args.adversarial_loss_weight[ep] * (A2B_adversarial_loss + B2A_adversarial_loss) + \
-                    (A2B_content_reconstruction_loss + B2A_content_reconstruction_loss) * args.content_rec_loss_weight + \
                     (A2B2A_cycle_loss + B2A2B_cycle_loss) * args.cycle_loss_weight[ep] + \
                     (ssim_A2B2A_loss + ssim_B2A2B_loss) * args.ssim_loss_weight[ep] + \
                     (att_A_loss + att_B_loss) * args.attention_weight
 
-        G_grad_content_A = t_A.gradient(G_loss_A, content_encoder_A.trainable_variables)
-        G_grad_generator_A = t_B.gradient(G_loss_A, generator_A.trainable_variables)
-        G_grad_att_A = t_C.gradient(G_loss_att_A, attention_A.trainable_variables)
+        G_grad_generator_A2B = t_A.gradient(G_loss_A, generator_A2B.trainable_variables)
+        G_grad_att_A = t_B.gradient(G_loss_att_A, attention_A.trainable_variables)
 
-        G_grad_content_B = t_D.gradient(G_loss_B, content_encoder_B.trainable_variables)
-        G_grad_generator_B = t_E.gradient(G_loss_B, generator_B.trainable_variables)
-        G_grad_att_B = t_F.gradient(G_loss_att_B, attention_B.trainable_variables)
+        G_grad_generator_B2A = t_C.gradient(G_loss_B, generator_B2A.trainable_variables)
+        G_grad_att_B = t_D.gradient(G_loss_att_B, attention_B.trainable_variables)
 
-        G_optimizer_A_enc.apply_gradients(zip(G_grad_content_A, content_encoder_A.trainable_variables))
-        G_optimizer_A_gen.apply_gradients(zip(G_grad_generator_A, generator_A.trainable_variables))
+        G_optimizer_A2B_gen.apply_gradients(zip(G_grad_generator_A2B, generator_A2B.trainable_variables))
         G_optimizer_A_att.apply_gradients(zip(G_grad_att_A, attention_A.trainable_variables))
 
-        G_optimizer_B_enc.apply_gradients(zip(G_grad_content_B, content_encoder_B.trainable_variables))
-        G_optimizer_B_gen.apply_gradients(zip(G_grad_generator_B, generator_B.trainable_variables))
+        G_optimizer_B2A_gen.apply_gradients(zip(G_grad_generator_B2A, generator_B2A.trainable_variables))
         G_optimizer_B_att.apply_gradients(zip(G_grad_att_B, attention_B.trainable_variables))
 
         return A2B, B2A
@@ -324,11 +299,8 @@ def train(args):
     @tf.function
     def sample(A, B):
 
-        content_A = content_encoder_A(A)
-        content_B = content_encoder_B(B)
-
-        A2B_ = generator_B(content_A)
-        B2A_ = generator_A(content_B)
+        A2B_ = generator_A2B(A)
+        B2A_ = generator_B2A(B)
 
         att_A = attention_A(A)
         att_B = attention_B(B)
@@ -340,11 +312,8 @@ def train(args):
         A2B = tf.math.add(tf.math.multiply(A2B_, att_A), tf.math.multiply(A, 1 - att_A))
         B2A = tf.math.add(tf.math.multiply(B2A_, att_B), tf.math.multiply(B, 1 - att_B))
 
-        content_A2B = content_encoder_B(A2B)
-        content_B2A = content_encoder_A(B2A)
-
-        A2B2A_ = generator_A(content_A2B)
-        B2A2B_ = generator_B(content_B2A)
+        A2B2A_ = generator_B2A(A2B)
+        B2A2B_ = generator_A2B(B2A)
 
         att_A2B = attention_B(A2B)
         att_B2A = attention_A(B2A)
@@ -386,7 +355,7 @@ def train(args):
                 train_step(A, B, ep)
                 
                 # sample
-                if G_optimizer_A_enc.iterations.numpy() % 680 == 0:
+                if G_optimizer_A_att.iterations.numpy() % 219 == 0:
                     A, B = next(test_iter)
                     
                     A = background_addition(A)
@@ -403,7 +372,7 @@ def train(args):
                     img = cv2.normalize(img, None, alpha=-1, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)                 
                     
                     try:
-                        im.imwrite(img, py.join(sample_dir, 'ep_{}_iter-{}.jpg'.format(str(ep).zfill(3), str(G_optimizer_A_enc.iterations.numpy()).zfill(6))))
+                        im.imwrite(img, py.join(sample_dir, 'ep_{}_iter-{}.jpg'.format(str(ep).zfill(3), str(G_optimizer_A_att.iterations.numpy()).zfill(6))))
                     except:
                         print('Image has pixel values not in range [-1.0, 1.0]')
 
@@ -412,18 +381,16 @@ def train(args):
                         model_path = os.path.join(models_path, 'model_{}'.format(str(ep).zfill(3)))
                         create_path(model_path)
 
-                        content_encoder_A.save(py.join(model_path, 'A_enc_{}'.format(str(ep).zfill(3))), overwrite=True, save_format='tf')
-                        generator_A.save(py.join(model_path, 'A_gen_{}'.format(str(ep).zfill(3))), overwrite=True, save_format='tf')
+                        generator_A2B.save(py.join(model_path, 'A2B_gen_{}'.format(str(ep).zfill(3))), overwrite=True, save_format='tf')
                         attention_A.save(py.join(model_path, 'A_att_{}'.format(str(ep).zfill(3))), overwrite=True, save_format='tf')
 
-                        content_encoder_B.save(py.join(model_path, 'B_enc_{}'.format(str(ep).zfill(3))), overwrite=True, save_format='tf')
-                        generator_B.save(py.join(model_path, 'B_gen_{}'.format(str(ep).zfill(3))), overwrite=True, save_format='tf')
+                        generator_B2A.save(py.join(model_path, 'B2A_gen_{}'.format(str(ep).zfill(3))), overwrite=True, save_format='tf')
                         attention_B.save(py.join(model_path, 'B_att_{}'.format(str(ep).zfill(3))), overwrite=True, save_format='tf')
         
 if __name__ == '__main__':
-    py.arg('--datasets_dir', default='/home/ema/my_workspace/datasets/sim2real/Westmoreland')
+    py.arg('--datasets_dir', default='/home/ema/my_workspace/datasets/sim2real/MICCAI_2017')
     py.arg('--save_dir', default='/home/ema/my_workspace')
-    py.arg('--backgrounds_dir', default='/home/ema/my_workspace/datasets/backgrounds/Westmoreland/backgrounds')
+    py.arg('--backgrounds_dir', default='/home/ema/my_workspace/datasets/backgrounds/MICCAI_2017/backgrounds')
     py.arg('--seg_model_path', default='/home/ema/my_workspace/datasets/models/seg_model_2017.hdf5')
     py.arg('--load_size', type=int, default=[576, 720])  # load image to this size
     py.arg('--crop_size', type=int, default=512)  # then crop to this size
@@ -437,7 +404,6 @@ if __name__ == '__main__':
     py.arg('--gradient_penalty_mode', default='none', choices=['none', 'dragan', 'wgan-gp'])
     py.arg('--gradient_penalty_weight', type=float, default=0.0)
     py.arg('--adversarial_loss_weight', type=float, default=[1.0, 1.0])
-    py.arg('--content_rec_loss_weight', type=float, default=0.0)
     py.arg('--cycle_loss_weight', type=float, default=[0.5, 10.0])
     py.arg('--ssim_loss_weight', type=float, default=[0.5, 10.0])
     py.arg('--attention_weight', type=float, default=1.0)
@@ -445,11 +411,10 @@ if __name__ == '__main__':
     py.arg('--ss_attention_thr', type=int, default=25) # must lie inside [0, 255]
     py.arg('--pool_size', type=int, default=50)  # pool size to store fake samples
     py.arg('--lrD_on_lrG', type=int, default=4)
-    py.arg('--start_saving_epoch', type=int, default=75)
+    py.arg('--start_saving_epoch', type=int, default=-1)
     py.arg('--neighbor_kernel_size', type=int, default=25)
     py.arg('--attention_background_constraint', type=bool, default=False)
     py.arg('--discriminator', type=str, default='ConvDiscriminator', choices=['ConvDiscriminator', 'ConvDiscriminator_no_spectral', 'ConvDiscriminator_no_spectral_25', 'ConvDiscriminator_dropout'])
     args = py.args()
 
     train(args)
-
