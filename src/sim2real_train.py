@@ -62,10 +62,13 @@ def train(args):
     # ==============================================================================
     # =                                   models                                   =
     # ==============================================================================
-
+    
+    # Build the generators
     generator_A2B = model_cc(input_shape_enc=(512, 512, 3), shape_dec=(128, 128, 256))
     generator_B2A = model_cc(input_shape_enc=(512, 512, 3), shape_dec=(128, 128, 256))
-
+    
+    # Attention module: try to import model weights. If it fails, try to import full model.
+    # If it fails again, create a model with no pre-trained weights.
     try:
         attention_A = model_Unet_sim2real(input_shape=(512, 512, 3))
         attention_B = model_Unet_sim2real(input_shape=(512, 512, 3))
@@ -74,6 +77,7 @@ def train(args):
         attention_B.load_weights(args.seg_model_path)
     
     except:
+        
         try:
             attention_A = tf.keras.models.load_model(args.seg_model_path)
             attention_B = tf.keras.models.load_model(args.seg_model_path)
@@ -82,6 +86,7 @@ def train(args):
             attention_A = model_Unet_sim2real(input_shape=(512, 512, 3))
             attention_B = model_Unet_sim2real(input_shape=(512, 512, 3))
     
+    # Build the dicriminator
     if args.discriminator == 'ConvDiscriminator':
         D_A = ConvDiscriminator(input_shape=(512, 512, 3))
         D_B = ConvDiscriminator(input_shape=(512, 512, 3))
@@ -125,21 +130,26 @@ def train(args):
             ############################
             #      image_synthesis     #
             ############################
-
+            
+            # Apply image-to-image translation on the inputs
             A2B_ = generator_A2B(A)
             B2A_ = generator_B2A(B)
 
+            # Compute the attention maps for the input 
             att_A = attention_A(A)
             att_B = attention_B(B)
-
+            
+            # Compute SS loss
             _, _, ss_loss_A = sim_segmentation_loss(foreground_A, att_A)
 
             att_A = tf.image.grayscale_to_rgb(att_A)
             att_B = tf.image.grayscale_to_rgb(att_B)
 
+            # Compute half-cycle outputs
             A2B = tf.math.add(tf.math.multiply(A2B_, att_A), tf.math.multiply(A, 1 - att_A))
             B2A = tf.math.add(tf.math.multiply(B2A_, att_B), tf.math.multiply(B, 1 - att_B))
 
+            # Repeat previous operations to close the cycle
             A2B2A_ = generator_B2A(A2B)
             B2A2B_ = generator_A2B(B2A)
 
@@ -152,6 +162,7 @@ def train(args):
             A2B2A = tf.math.add(tf.math.multiply(A2B2A_, att_A2B), tf.math.multiply(A2B, 1 - att_A2B))
             B2A2B = tf.math.add(tf.math.multiply(B2A2B_, att_B2A), tf.math.multiply(B2A, 1 - att_B2A))
 
+            # Compute discriminator's output
             A2B_d_logits = D_B(A2B, training=True)
             B2A_d_logits = D_A(B2A, training=True)
 
@@ -159,6 +170,7 @@ def train(args):
             #     loss_computation     #
             ############################
 
+            # Compute losses
             A2B_adversarial_loss = g_loss_fn(A2B_d_logits)
             B2A_adversarial_loss = g_loss_fn(B2A_d_logits)
 
@@ -171,6 +183,7 @@ def train(args):
             att_A_loss = attention_loss_fn(att_A, att_A2B)
             att_B_loss = attention_loss_fn(att_B, att_B2A)
 
+            # Merge losses for generators and attention modules
             G_loss_A = args.adversarial_loss_weight[ep] * (A2B_adversarial_loss + B2A_adversarial_loss) + \
                     (A2B2A_cycle_loss + B2A2B_cycle_loss) * args.cycle_loss_weight[ep] + \
                     (ssim_A2B2A_loss + ssim_B2A2B_loss) * args.ssim_loss_weight[ep]
@@ -189,12 +202,14 @@ def train(args):
                     (ssim_A2B2A_loss + ssim_B2A2B_loss) * args.ssim_loss_weight[ep] + \
                     (att_A_loss + att_B_loss) * args.attention_weight
 
+        # Compute gradients
         G_grad_generator_A2B = t_A.gradient(G_loss_A, generator_A2B.trainable_variables)
         G_grad_att_A = t_B.gradient(G_loss_att_A, attention_A.trainable_variables)
 
         G_grad_generator_B2A = t_C.gradient(G_loss_B, generator_B2A.trainable_variables)
         G_grad_att_B = t_D.gradient(G_loss_att_B, attention_B.trainable_variables)
 
+        # Apply backpropagation
         G_optimizer_A2B_gen.apply_gradients(zip(G_grad_generator_A2B, generator_A2B.trainable_variables))
         G_optimizer_A_att.apply_gradients(zip(G_grad_att_A, attention_A.trainable_variables))
 
@@ -207,28 +222,37 @@ def train(args):
     @tf.function
     def train_D(A, B, A2B, B2A, ep):
         with tf.GradientTape() as t_A, tf.GradientTape() as t_B:
+            
+            # Compute discriminator's output
             A_d_logits = D_A(A, training=True)
             B2A_d_logits = D_A(B2A, training=True)
             B_d_logits = D_B(B, training=True)
             A2B_d_logits = D_B(A2B, training=True)
 
+            # Compute losses
             A_d_loss, B2A_d_loss = d_loss_fn(A_d_logits, B2A_d_logits)
             B_d_loss, A2B_d_loss = d_loss_fn(B_d_logits, A2B_d_logits)
+            
+            # Apply gradient penalty
             D_A_gp = gan.gradient_penalty(functools.partial(D_A, training=True), A, B2A, mode=args.gradient_penalty_mode)
             D_B_gp = gan.gradient_penalty(functools.partial(D_B, training=True), B, A2B, mode=args.gradient_penalty_mode)
 
+            # Merge losses
             D_loss_A = (A_d_loss + B2A_d_loss) * args.adversarial_loss_weight[ep] + D_A_gp * args.gradient_penalty_weight
             D_loss_B = (B_d_loss + A2B_d_loss) * args.adversarial_loss_weight[ep] + D_B_gp * args.gradient_penalty_weight
 
+        # Compute gradients
         D_grad_A = t_A.gradient(D_loss_A, D_A.trainable_variables)
         D_grad_B = t_B.gradient(D_loss_B, D_B.trainable_variables)
 
+        # Apply backpropagation
         D_optimizer_A.apply_gradients(zip(D_grad_A, D_A.trainable_variables))
         D_optimizer_B.apply_gradients(zip(D_grad_B, D_B.trainable_variables))
 
         return
 
-    def random_background(backgrounds_path):
+    # Pick a random background from the specified path and return it as a tensor.
+    def random_background(backgrounds_path):    
         list_backgrounds = os.listdir(backgrounds_path)
         background = cv2.imread(os.path.join(backgrounds_path, list_backgrounds[randrange(len(list_backgrounds))]))
         background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
@@ -237,65 +261,77 @@ def train(args):
         background = tf.image.random_crop(background, [args.crop_size, args.crop_size, tf.shape(background)[-1]])
         return tf.expand_dims(background, axis=0)
 
-    # binarize img using thr in range [0, 255] --> [-1, 1]
+    # Binarize img using thr in range [0, 255] --> [-1, 1]
     def binarize_img(img, thr):
         img = 500*(img - ((2/255)*thr - 1))
         mask = tf.math.sigmoid(img)
         return mask
 
-    # binarize masks using thr in range [0, 255] --> [0, 1]
+    # Binarize masks using thr in range [0, 255] --> [0, 1]
     def binarize_mask(img, thr):
         img = 500*(img - ((1/255)*(255 + thr) - 1))
         mask = tf.math.sigmoid(img)
         return mask
     
+    # Apply vertcal flip wit 50% probability and horizontal flip with probability 10%
     def random_flip(A):
-        rdm_num = randint(0, 1)
-        rdm_num_2 = randint(0, 10)
-        if rdm_num == 1:
+        if randint(0, 1):
             A = tf.image.flip_left_right(A)
-        if rdm_num_2 == 10:
+        if randint(0, 9) == 9:
             A = tf.image.flip_up_down(A)
-        
         return A
 
+    # Blend tools A on a random background
     def background_addition(A):
         background = random_background(args.backgrounds_dir)
         mask = binarize_img(A, 5)
         return tf.math.add(tf.math.multiply(A, mask), tf.math.multiply(background, 1 - mask))
 
+    # Produce neighbor and backgrund masks from a tools mask
     def generate_masks(foreground_mask):
-        background_mask = 1 - binarize_mask(tfa.image.mean_filter2d(foreground_mask, args.neighbor_kernel_size, 'SYMMETRIC'), 5)
+        filtered_mask = tfa.image.mean_filter2d(foreground_mask, args.neighbor_kernel_size, 'SYMMETRIC')
+        background_mask = 1 - binarize_mask(filtered_mask, 5)
         neighbor_mask = 1 - background_mask - foreground_mask
         return neighbor_mask, background_mask
-
+    
+    # Compute SS loss
     def sim_segmentation_loss(foreground_A, att_A):
+        
+        # SS Loss with constrained background
         if args.attention_background_constraint:
             neighbor_A, background_A = generate_masks(foreground_A)
-            att_A_ = tf.math.multiply(1 - neighbor_A, binarize_mask(att_A, args.ss_attention_thr))
+            bin_mask = binarize_mask(att_A, args.ss_attention_thr)
+            att_A_ = tf.math.multiply(1 - neighbor_A, bin_mask)
             ss_loss = attention_loss_fn(foreground_A, att_A_)
+            
+        # SS Loss without constrained background
         else:
             _, background_A = generate_masks(foreground_A)
-            att_A_ = tf.math.multiply(foreground_A, binarize_mask(att_A, args.ss_attention_thr))
+            bin_mask = binarize_mask(att_A, args.ss_attention_thr)
+            att_A_ = tf.math.multiply(foreground_A, bin_mask)
             ss_loss = attention_loss_fn(foreground_A, att_A_)
 
         return foreground_A, background_A, ss_loss
 
     def train_step(A, B, ep):
-
+        
+        # Random flip the tool image, compute the foreground mask and add a random background
         A = random_flip(A)
         foreground_A = tf.image.rgb_to_grayscale(binarize_img(A, 5))
         A = background_addition(A)
 
+        # Train generators and attention modules for 1 step
         A2B, B2A = train_G(A, B, foreground_A, ep)
 
+        # Push A2B and B2A in the pool
         A2B = A2B_pool(A2B)
         B2A = B2A_pool(B2A)
 
+        # Train discriminators for 1 step
         train_D(A, B, A2B, B2A, ep)
 
         return
-
+    
     @tf.function
     def sample(A, B):
 
