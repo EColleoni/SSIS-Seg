@@ -1,6 +1,9 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"]="3"
 
+import sys
+sys.path.insert(1, 'sim2real/utils')
+
 import functools
 import imlib as im
 import numpy as np
@@ -26,6 +29,14 @@ from utils import create_path
 # ==============================================================================
 
 def train(args):
+    """Train an image-to-image translation model for
+       simulation-to-real surgical image sythesis.
+
+    Args:
+        args: list of arguments that specify datasets and 
+            path and hyperparameters.
+
+    """
 
     # output_dir
     output_dir = py.join(args.save_dir, 'output_Westmoreland')
@@ -125,6 +136,26 @@ def train(args):
 
     @tf.function
     def train_G(A, B, foreground_A, ep):
+        """Train the generatrs and the attention
+           modules for one step.
+
+        Args:
+            A: image with simulation tools blended on a
+                surgical background.
+            
+            B: real surgical image.
+
+            foreground_A: foreground mask associated to A.
+
+            ep: epoch number.
+
+        Returns:
+            A2B: synthetic simulation-to-real image
+
+            B2A: synthetic real-to-simulation image
+
+    """
+
         with tf.GradientTape() as t_A, tf.GradientTape() as t_B, tf.GradientTape() as t_C, tf.GradientTape() as t_D:
 
             ############################
@@ -221,6 +252,24 @@ def train(args):
    
     @tf.function
     def train_D(A, B, A2B, B2A, ep):
+        """Train the discriminatos for one step.
+
+            Args:
+                A: image with simulation tools blended on a
+                    surgical background.
+                
+                B: real surgical image.
+
+                A2B: synthetic simulation-to-real image from
+                    the pool.
+
+                B2A: synthetic real-to-simulation image from
+                    the pool.
+
+                ep: epoch number.
+
+        """
+
         with tf.GradientTape() as t_A, tf.GradientTape() as t_B:
             
             # Compute discriminator's output
@@ -251,8 +300,19 @@ def train(args):
 
         return
 
-    # Pick a random background from the specified path and return it as a tensor.
     def random_background(backgrounds_path):    
+        """Picks a random background from the specified
+           path and return it as a tensor.
+
+        Args:
+            backgrounds_path: path to the directory containing 
+                surgical backgorund images.
+
+        Returns:
+            Tensor containing a surgical background image.
+
+        """
+
         list_backgrounds = os.listdir(backgrounds_path)
         background = cv2.imread(os.path.join(backgrounds_path, list_backgrounds[randrange(len(list_backgrounds))]))
         background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
@@ -261,34 +321,88 @@ def train(args):
         background = tf.image.random_crop(background, [args.crop_size, args.crop_size, tf.shape(background)[-1]])
         return tf.expand_dims(background, axis=0)
 
-    # Binarize img using thr in range [0, 255] --> [-1, 1]
     def binarize_img(img, thr):
+        """Binarizes img using thr in range [0, 255] --> [-1, 1]
+           All operations are differentiable to support backpropagation.
+
+        Args:
+            img: Tensor image to be binarized.
+
+            thr: threshold in range [0, 255] to binarize the image.
+
+        Returns:
+            Binarized tensor image in range [-1, 1]
+
+        """
+
         img = 500*(img - ((2/255)*thr - 1))
         mask = tf.math.sigmoid(img)
         return mask
 
-    # Binarize masks using thr in range [0, 255] --> [0, 1]
     def binarize_mask(img, thr):
+        """Binarizes masks using thr in range [0, 255] --> [0, 1].
+           All operations are differentiable to support backpropagation.
+
+        Args:
+            img: Tensor grayscale mask to be binarized.
+
+            thr: threshold in range [0, 255] to binarize the mask.
+
+        Returns:
+            Binarized tensor mask in range [0, 1]
+
+        """
+
         img = 500*(img - ((1/255)*(255 + thr) - 1))
         mask = tf.math.sigmoid(img)
         return mask
     
-    # Apply vertcal flip wit 50% probability and horizontal flip with probability 10%
     def random_flip(A):
+        """Applies vertcal flip wit 50% probability and horizontal flip 
+           with probability 10%.
+
+        Args:
+            A: Tensor image.
+
+        Returns:
+            Flipped tensor image.
+
+        """
+
         if randint(0, 1):
             A = tf.image.flip_left_right(A)
         if randint(0, 9) == 9:
             A = tf.image.flip_up_down(A)
         return A
 
-    # Blend tools A on a random background
     def background_addition(A):
+        """Blends tools A on a random background.
+
+        Args:
+            A: Tensor tools image with black backgound.
+
+        Returns:
+            Tensor image with tools blended on a surgical background.
+
+        """
+
         background = random_background(args.backgrounds_dir)
         mask = binarize_img(A, 5)
         return tf.math.add(tf.math.multiply(A, mask), tf.math.multiply(background, 1 - mask))
 
-    # Produce neighbor and backgrund masks from a tools mask
     def generate_masks(foreground_mask):
+        """Produces neighbor and backgrund masks from a tools mask.
+
+        Args:
+            foreground_mask: binary tensor mask.
+
+        Returns:
+            neighbor_mask: binary tensor mask of the neighbors of the input mask.
+
+            background_mask: binary tensor mask of the background of the input mask.
+
+        """
+
         filtered_mask = tfa.image.mean_filter2d(foreground_mask, args.neighbor_kernel_size, 'SYMMETRIC')
         background_mask = 1 - binarize_mask(filtered_mask, 5)
         neighbor_mask = 1 - background_mask - foreground_mask
@@ -296,6 +410,17 @@ def train(args):
     
     # Compute SS loss
     def sim_segmentation_loss(foreground_A, att_A):
+        """Computes SS loss.
+
+        Args:
+            foreground_mask: binary tensor mask.
+
+            att_A: grayscale tensor from the attention modules.
+
+        Returns:
+            Scalar number crresponding to the SS loss.
+
+        """
         
         # SS Loss with constrained background
         if args.attention_background_constraint:
@@ -314,6 +439,17 @@ def train(args):
         return foreground_A, background_A, ss_loss
 
     def train_step(A, B, ep):
+
+        """Trains the generators and the discriminators for one sep.
+           Updates the pools with new synthetic images.
+
+        Args:
+            A: image with simulation tools blended on a
+                surgical background.
+            
+            B: real surgical image.
+
+        """
         
         # Random flip the tool image, compute the foreground mask and add a random background
         A = random_flip(A)
@@ -334,6 +470,29 @@ def train(args):
     
     @tf.function
     def sample(A, B):
+        """Predicts the synthetic images over a full cycle.
+
+        Args:
+            A: image with simulation tools blended on a
+                surgical background.
+            
+            B: real surgical image.
+
+        Returns:
+            A: image with simulation tools blended on a
+                surgical background.
+            
+            B: real surgical image.
+
+            A2B, B2A: synthetic real and simulation images (half cycle), respectively.
+
+            A2B2A, B2A2B: synthetic simulation and real images (full cycle), respectively.
+
+            att_A, att_B: attention maps from attention modules A and B (half cycle), respectively.
+
+            att_A2B, att_B2A: attention maps from attention modules B and A (full cycle), respectively.
+
+        """
 
         A2B_ = generator_A2B(A)
         B2A_ = generator_B2A(B)
@@ -424,32 +583,32 @@ def train(args):
                         attention_B.save(py.join(model_path, 'B_att_{}'.format(str(ep).zfill(3))), overwrite=True, save_format='tf')
         
 if __name__ == '__main__':
-    py.arg('--datasets_dir', default='/home/ema/my_workspace/datasets/sim2real/MICCAI_2017')
-    py.arg('--save_dir', default='/home/ema/my_workspace')
-    py.arg('--backgrounds_dir', default='/home/ema/my_workspace/datasets/backgrounds/MICCAI_2017/backgrounds')
-    py.arg('--seg_model_path', default='/home/ema/my_workspace/datasets/models/seg_model_2017.hdf5')
+    py.arg('--datasets_dir', default='/home/ema/my_workspace/datasets/sim2real/MICCAI_2017') # dataset directory
+    py.arg('--save_dir', default='/home/ema/my_workspace') # save directory
+    py.arg('--backgrounds_dir', default='/home/ema/my_workspace/datasets/backgrounds/MICCAI_2017/backgrounds') # backgrounds directory
+    py.arg('--seg_model_path', default='/home/ema/my_workspace/datasets/models/seg_model_2017.hdf5') # path to the pre-training weights for the attention modules.
     py.arg('--load_size', type=int, default=[576, 720])  # load image to this size
     py.arg('--crop_size', type=int, default=512)  # then crop to this size
-    py.arg('--batch_size', type=int, default=1)
-    py.arg('--epochs', type=int, default=100)
+    py.arg('--batch_size', type=int, default=1) # size of the batch
+    py.arg('--epochs', type=int, default=100) # number of epoch
     py.arg('--epoch_decay', type=int, default=75)  # epoch to start decaying learning rate
-    py.arg('--lr', type=float, default=0.0002)
-    py.arg('--lr_att', type=float, default=0.0002)
-    py.arg('--beta_1', type=float, default=0.5)
+    py.arg('--lr', type=float, default=0.0002) # learning rate for generators and discriminators
+    py.arg('--lr_att', type=float, default=0.0002) # learning rate for the attention modules
+    py.arg('--beta_1', type=float, default=0.5) # beta 1 value to setup Adam optimizer
     py.arg('--adversarial_loss_mode', default='lsgan', choices=['gan', 'hinge_v1', 'hinge_v2', 'lsgan', 'wgan'])
     py.arg('--gradient_penalty_mode', default='none', choices=['none', 'dragan', 'wgan-gp'])
-    py.arg('--gradient_penalty_weight', type=float, default=0.0)
-    py.arg('--adversarial_loss_weight', type=float, default=[1.0, 1.0])
-    py.arg('--cycle_loss_weight', type=float, default=[0.5, 10.0])
-    py.arg('--ssim_loss_weight', type=float, default=[0.5, 10.0])
-    py.arg('--attention_weight', type=float, default=1.0)
-    py.arg('--sim_supervision_weight', type=float, default=2.0)
-    py.arg('--ss_attention_thr', type=int, default=25) # must lie inside [0, 255]
+    py.arg('--gradient_penalty_weight', type=float, default=0.0) # hyperparam. to weight gradient pealty
+    py.arg('--adversarial_loss_weight', type=float, default=[1.0, 1.0]) # hyperparam. to weight adversarial loss
+    py.arg('--cycle_loss_weight', type=float, default=[0.5, 10.0]) # hyperparam. to weight cycle loss
+    py.arg('--ssim_loss_weight', type=float, default=[0.5, 10.0]) # hyperparam. to weight structure similarity loss
+    py.arg('--attention_weight', type=float, default=1.0) # hyperparam. to weight Attention Similarity loss
+    py.arg('--sim_supervision_weight', type=float, default=2.0) # hyperparam. to weight Simulation Supervision loss
+    py.arg('--ss_attention_thr', type=int, default=25) # threshold to binarize attention maps in SS loss
     py.arg('--pool_size', type=int, default=50)  # pool size to store fake samples
-    py.arg('--lrD_on_lrG', type=int, default=4)
-    py.arg('--start_saving_epoch', type=int, default=-1)
-    py.arg('--neighbor_kernel_size', type=int, default=25)
-    py.arg('--attention_background_constraint', type=bool, default=False)
+    py.arg('--lrD_on_lrG', type=int, default=4) # ratio between discriminator's and generator's learning rates
+    py.arg('--start_saving_epoch', type=int, default=-1) # epoch from which to start saving models
+    py.arg('--neighbor_kernel_size', type=int, default=25) # size of the neighbor mask (costrained loss only)
+    py.arg('--attention_background_constraint', type=bool, default=False) # flag to set the background constraint on the SS loss
     py.arg('--discriminator', type=str, default='ConvDiscriminator', choices=['ConvDiscriminator', 'ConvDiscriminator_no_spectral', 'ConvDiscriminator_no_spectral_25', 'ConvDiscriminator_dropout'])
     args = py.args()
 
