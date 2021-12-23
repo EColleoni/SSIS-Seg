@@ -19,8 +19,8 @@ from utils import create_path
 
 
 def predict(args):
-    """Produce an synthetic frame starting from simulation tools
-        blended on a random surgical background
+    """Produce a synthetic frame starting from simulation tools
+        blended on a random surgical background.
        
     Args:
         args: list of arguments that specify dataset path, backgrounds
