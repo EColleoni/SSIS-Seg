@@ -19,9 +19,28 @@ from utils import create_path
 
 
 def predict(args):
+    """Produce an synthetic frame starting from simulation tools
+        blended on a random surgical background
+       
+    Args:
+        args: list of arguments that specify dataset path, backgrounds
+            path and models path.
+            
+    """
 
-    # Pick and return a random background image from the specified folder
     def random_background(backgrounds_path):
+        """Picks a random background from the specified
+           path and return it as a tensor.
+
+        Args:
+            backgrounds_path: path to the directory containing 
+                surgical backgorund images.
+
+        Returns:
+            Tensor containing a surgical background image.
+
+        """
+        
         list_backgrounds = os.listdir(backgrounds_path)
         background = cv2.imread(os.path.join(backgrounds_path, list_backgrounds[randrange(len(list_backgrounds))]))
         background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
@@ -30,14 +49,35 @@ def predict(args):
         background = tf.image.random_crop(background, [args.crop_size, args.crop_size, tf.shape(background)[-1]])
         return tf.expand_dims(background, axis=0)
     
-    # Binarize an image using differentiable operations
     def binarize_img(img, thr):
+        """Binarizes img using thr in range [0, 255] --> [-1, 1]
+           All operations are differentiable to support backpropagation.
+
+        Args:
+            img: Tensor image to be binarized.
+
+            thr: threshold in range [0, 255] to binarize the image.
+
+        Returns:
+            Binarized tensor image in range [-1, 1]
+
+        """
+            
         img = 500*(img - ((2/255)*thr - 1))
         mask = tf.math.sigmoid(img)
         return mask
-
-    # Blend the tools on a random background image from the specified folder
+    
     def background_addition(A):
+        """Blends tools A on a random background.
+
+        Args:
+            A: Tensor tools image with black backgound.
+
+        Returns:
+            Tensor image with tools blended on a surgical background.
+
+        """
+        
         background = random_background(args.backgrounds_dir)
         mask = binarize_img(A, 5)
         return tf.math.add(tf.math.multiply(A, mask), tf.math.multiply(background, 1 - mask))
@@ -90,15 +130,15 @@ def predict(args):
 
 if __name__ == '__main__':
     
-    py.arg('--model_number', default='000')
-    py.arg('--models_dir', default='/home/ema/my_workspace/output_Westmoreland/models')
-    py.arg('--save_dir', default='/home/ema/my_workspace/datasets/df')
-    py.arg('--datasets_dir', default='/home/ema/my_workspace/datasets/sim2real/MICCAI_2020/version_1/trainA')
-    py.arg('--backgrounds_dir', default='/home/ema/my_workspace/datasets/backgrounds/MICCAI_2017/backgrounds')
+    py.arg('--models_dir', default='/home/ema/my_workspace/output_Westmoreland/models') # directory containing trained models
+    py.arg('--model_number', default='000') # model number from the model's directory
+    py.arg('--save_dir', default='/home/ema/my_workspace/datasets/df') # save directory
+    py.arg('--datasets_dir', default='/home/ema/my_workspace/datasets/sim2real/MICCAI_2020/version_1/trainA') # dataset directory
+    py.arg('--backgrounds_dir', default='/home/ema/my_workspace/datasets/backgrounds/MICCAI_2017/backgrounds') # backgrounds directory
     py.arg('--load_size', type=int, default=[576, 720])  # load image to this size
     py.arg('--crop_size', type=int, default=512)  # then crop to this size
-    py.arg('--batch_size', type=int, default=8)
-    py.arg('--img_format', default='png')
+    py.arg('--batch_size', type=int, default=8) # batch size
+    py.arg('--img_format', default='png') # format to save synthetic images
     args = py.args()
 
     predict(args)
