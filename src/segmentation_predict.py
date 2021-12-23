@@ -16,11 +16,14 @@ import module_spectral as module
 from sim2real_segmentation_model import model_Unet_sim2real
 from segmentation_models.losses import bce_jaccard_loss
 
-# ==============================================================================
-# =                                   param                                    =
-# ==============================================================================
 
 def predict(args):
+    """Produce segmentation predictions for all frames in the specified folder.
+       
+    Args:
+        args: list of arguments that specify dataset path and models path.
+            
+    """
 
     # ==============================================================================
     # =                                    data                                    =
@@ -46,6 +49,8 @@ def predict(args):
 
     @tf.function
     def test_step(img):
+        """Return the predicted segmentation masks for the given image batch."""
+        
         prediction = segmentation_model(img)
         return prediction
 
@@ -69,12 +74,12 @@ def predict(args):
             idx += 1
 
 
-py.arg('--dataset_dir', default='/home/ema/my_workspace/datasets/dataset_simulation/UCL/train/imgs')
-py.arg('--model_dir', default='/home/ema/my_workspace/output_seg/models/model_003.h5')
-py.arg('--save_dir', default='/home/ema/my_workspace/output_seg/df')
+py.arg('--dataset_dir', default='/home/ema/my_workspace/datasets/dataset_simulation/UCL/train/imgs') # dataset directory
+py.arg('--model_dir', default='/home/ema/my_workspace/output_seg/models/model_003.h5') # path to the prediction model
+py.arg('--save_dir', default='/home/ema/my_workspace/output_seg/df') # directory where to save data
 py.arg('--load_size', type=int, default=[512, 512])  # load image to this size
-py.arg('--batch_size', type=int, default=8)
-py.arg('--img_format', type=str, default='png')
+py.arg('--batch_size', type=int, default=8) # batch size
+py.arg('--img_format', type=str, default='png') # format to save synthetic images
 
 args = py.args()
 predict(args)
