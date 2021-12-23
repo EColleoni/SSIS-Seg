@@ -33,7 +33,7 @@ def train(args):
        simulation-to-real surgical image sythesis.
 
     Args:
-        args: list of arguments that specify datasets and 
+        args: list of arguments that specify datasets
             path and hyperparameters.
 
     """
