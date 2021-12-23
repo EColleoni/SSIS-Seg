@@ -21,6 +21,11 @@ from segmentation_models.losses import bce_jaccard_loss
 # ==============================================================================
 
 def train(args):
+    """Train a segmentation model.
+    Args:
+        args: list of arguments that specify datasets
+            path and hyperparameters.
+    
     # output_dir
     output_dir = py.join('output_seg')
     py.mkdir(output_dir)
@@ -36,6 +41,14 @@ def train(args):
     # ==============================================================================
 
     def calc_IoU(mask_1, mask_2):
+        """Calculate Intersection over Union score between two masks.
+    
+        Args:
+            mask_1, mask_2: masks used to evaluate IoU.
+        Returns:
+            Intersection over union score.
+        """
+    
         mask_1 = mask_1 > 0.3
         mask_2 = mask_2 > 0.3
 
@@ -55,6 +68,7 @@ def train(args):
     # ==============================================================================
 
     def train_gen():
+        """Produce a generator for the training set."""
 
         train_image_gen = tf.keras.preprocessing.image.ImageDataGenerator(horizontal_flip=True, vertical_flip=True, dtype='float32', rescale=1./255)
         train_gt_gen = tf.keras.preprocessing.image.ImageDataGenerator(horizontal_flip=True, vertical_flip=True, dtype='float32', rescale=1./255)
@@ -73,6 +87,7 @@ def train(args):
             yield img_gen, gt_gen
 
     def val_gen():
+        """Produce a generator for the validation set."""
 
         val_image_gen = tf.keras.preprocessing.image.ImageDataGenerator(dtype='float32', rescale=1./255)
         val_gt_gen = tf.keras.preprocessing.image.ImageDataGenerator(dtype='float32', rescale=1./255)
@@ -111,6 +126,15 @@ def train(args):
 
     @tf.function
     def train_step(img, gt):
+        """Trains the segmentation model for one sep.
+        
+        Args:
+            img, gt: images batch and relative ground truth.
+                
+        Returns:
+            Return the segmentation loss for the given batch.
+     
+        """
 
         img_ = tf.convert_to_tensor(img)
         gt_ = tf.convert_to_tensor(gt)
@@ -133,6 +157,16 @@ def train(args):
 
     @tf.function
     def sample(img):
+        """Predicts the segmentation map of a given batch.
+        
+        Args:
+            img: image batch that will be segmented.
+                
+        Returns:
+            Returns the computedprediction for the batch.
+                
+        """
+    
         prediction = segmentation_model(img)
         return prediction
 
@@ -192,13 +226,13 @@ def train(args):
             else:
                 print('Validation metric did not improve from {}'.format(str(best_val_metric)))
 
-py.arg('--dataset_dir', default='/home/ema/my_workspace/datasets/dataset_simulation/UCL')
+py.arg('--dataset_dir', default='/home/ema/my_workspace/datasets/dataset_simulation/UCL') # Dataset directory
 py.arg('--load_size', type=int, default=[512, 512])  # load image to this size
-py.arg('--batch_size', type=int, default=8)
-py.arg('--epochs', type=int, default=100)
+py.arg('--batch_size', type=int, default=8) # Batch size
+py.arg('--epochs', type=int, default=100) # # number of epochs
 py.arg('--epoch_decay', type=int, default=25)  # epoch to start decaying learning rate
-py.arg('--lr', type=float, default=0.0001)
-py.arg('--beta_1', type=float, default=0.9)
+py.arg('--lr', type=float, default=0.0001) # learning rate
+py.arg('--beta_1', type=float, default=0.9) # beta 1 value to setup Adam optimizer
 args = py.args()
 train(args)
 
