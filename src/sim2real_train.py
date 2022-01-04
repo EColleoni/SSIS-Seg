@@ -20,8 +20,8 @@ import data
 import module_spectral as module
 from segmentation_models.losses import bce_jaccard_loss as attention_loss_fn
 from random import randrange, randint
-from MUNIT_model_content_spectral import model_cc, ConvDiscriminator, ConvDiscriminator_no_spectral, ConvDiscriminator_no_spectral_25, ConvDiscriminator_dropout
-from sim2real_segmentation_model import model_Unet_sim2real
+from sim2real_models import model_cc, ConvDiscriminator, ConvDiscriminator_no_spectral, ConvDiscriminator_no_spectral_25, ConvDiscriminator_dropout
+from segmentation_models import model_Unet_sim2real
 from utils import create_path
 
 # ==============================================================================
