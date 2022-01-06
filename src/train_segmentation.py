@@ -2,7 +2,7 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 import sys
-sys.path.insert(1, 'sim2real/utils')
+sys.path.insert(1, '/home/ema/my_workspace/codes/SSIS-Seg/utils')
 
 import numpy as np
 import pylib as py
@@ -13,7 +13,7 @@ import copy
 import h5py
 
 import module_spectral as module
-from sim2real_segmentation_model import model_Unet_sim2real
+from models_segmentation import model_Unet_sim2real
 from segmentation_models.losses import bce_jaccard_loss
 
 # ==============================================================================
@@ -25,7 +25,8 @@ def train(args):
     Args:
         args: list of arguments that specify datasets
             path and hyperparameters.
-    
+    """
+
     # output_dir
     output_dir = py.join('output_seg')
     py.mkdir(output_dir)

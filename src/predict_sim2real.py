@@ -2,7 +2,7 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"]="2"
 
 import sys
-sys.path.insert(1, 'sim2real/utils')
+sys.path.insert(1, '/home/ema/my_workspace/codes/SSIS-Seg/utils')
 
 import imlib as im
 import numpy as np
@@ -12,10 +12,7 @@ import tqdm
 import cv2
 
 import data
-from random import randrange
-from sim2real_models import model_cc
-from segmentation_models import model_Unet_sim2real
-from utils import create_path
+from utils import *
 
 
 def predict(args):
@@ -27,60 +24,6 @@ def predict(args):
             path and models path.
             
     """
-
-    def random_background(backgrounds_path):
-        """Picks a random background from the specified
-           path and return it as a tensor.
-
-        Args:
-            backgrounds_path: path to the directory containing 
-                surgical backgorund images.
-
-        Returns:
-            Tensor containing a surgical background image.
-
-        """
-        
-        list_backgrounds = os.listdir(backgrounds_path)
-        background = cv2.imread(os.path.join(backgrounds_path, list_backgrounds[randrange(len(list_backgrounds))]))
-        background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
-        background = background*(2/255) - 1
-        background = tf.image.resize(background, [args.load_size[0], args.load_size[1]])
-        background = tf.image.random_crop(background, [args.crop_size, args.crop_size, tf.shape(background)[-1]])
-        return tf.expand_dims(background, axis=0)
-    
-    def binarize_img(img, thr):
-        """Binarizes img using thr in range [0, 255] --> [-1, 1]
-           All operations are differentiable to support backpropagation.
-
-        Args:
-            img: Tensor image to be binarized.
-
-            thr: threshold in range [0, 255] to binarize the image.
-
-        Returns:
-            Binarized tensor image in range [-1, 1]
-
-        """
-            
-        img = 500*(img - ((2/255)*thr - 1))
-        mask = tf.math.sigmoid(img)
-        return mask
-    
-    def background_addition(A):
-        """Blends tools A on a random background.
-
-        Args:
-            A: Tensor tools image with black backgound.
-
-        Returns:
-            Tensor image with tools blended on a surgical background.
-
-        """
-        
-        background = random_background(args.backgrounds_dir)
-        mask = binarize_img(A, 5)
-        return tf.math.add(tf.math.multiply(A, mask), tf.math.multiply(background, 1 - mask))
 
     output_dir = args.save_dir
     create_path(output_dir)
@@ -111,7 +54,7 @@ def predict(args):
     for A, _ in tqdm.tqdm(dataset_test, desc='Inner Epoch Loop', total=len_dataset):
   
         #Predict
-        A = background_addition(A)
+        A = background_addition(A, args)
         A2B_ = generator_A2B(A)
         att_A = attention_A(A)
         att_A = tf.image.grayscale_to_rgb(att_A)

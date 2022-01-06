@@ -2,7 +2,7 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"]="3"
 
 import sys
-sys.path.insert(1, 'sim2real/utils')
+sys.path.insert(1, '/home/ema/my_workspace/codes/SSIS-Seg/utils')
 
 import functools
 import imlib as im
@@ -10,7 +10,6 @@ import numpy as np
 import pylib as py
 import tensorflow as tf
 import tensorflow.keras as keras
-import tensorflow_addons as tfa
 import tf2lib as tl
 import tf2gan as gan
 import tqdm
@@ -19,10 +18,9 @@ import cv2
 import data
 import module_spectral as module
 from segmentation_models.losses import bce_jaccard_loss as attention_loss_fn
-from random import randrange, randint
-from sim2real_models import model_cc, ConvDiscriminator, ConvDiscriminator_no_spectral, ConvDiscriminator_no_spectral_25, ConvDiscriminator_dropout
-from segmentation_models import model_Unet_sim2real
-from utils import create_path
+from models_sim2real import model_cc, ConvDiscriminator, ConvDiscriminator_no_spectral, ConvDiscriminator_no_spectral_25, ConvDiscriminator_dropout
+from models_segmentation import model_Unet_sim2real
+from utils import *
 
 # ==============================================================================
 # =                                   param                                    =
@@ -299,114 +297,6 @@ def train(args):
         D_optimizer_B.apply_gradients(zip(D_grad_B, D_B.trainable_variables))
 
         return
-
-    def random_background(backgrounds_path):    
-        """Picks a random background from the specified
-           path and return it as a tensor.
-
-        Args:
-            backgrounds_path: path to the directory containing 
-                surgical backgorund images.
-
-        Returns:
-            Tensor containing a surgical background image.
-
-        """
-
-        list_backgrounds = os.listdir(backgrounds_path)
-        background = cv2.imread(os.path.join(backgrounds_path, list_backgrounds[randrange(len(list_backgrounds))]))
-        background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
-        background = background*(2/255) - 1
-        background = tf.image.resize(background, [args.load_size[0], args.load_size[1]])
-        background = tf.image.random_crop(background, [args.crop_size, args.crop_size, tf.shape(background)[-1]])
-        return tf.expand_dims(background, axis=0)
-
-    def binarize_img(img, thr):
-        """Binarizes img using thr in range [0, 255] --> [-1, 1]
-           All operations are differentiable to support backpropagation.
-
-        Args:
-            img: Tensor image to be binarized.
-
-            thr: threshold in range [0, 255] to binarize the image.
-
-        Returns:
-            Binarized tensor image in range [-1, 1]
-
-        """
-
-        img = 500*(img - ((2/255)*thr - 1))
-        mask = tf.math.sigmoid(img)
-        return mask
-
-    def binarize_mask(img, thr):
-        """Binarizes masks using thr in range [0, 255] --> [0, 1].
-           All operations are differentiable to support backpropagation.
-
-        Args:
-            img: Tensor grayscale mask to be binarized.
-
-            thr: threshold in range [0, 255] to binarize the mask.
-
-        Returns:
-            Binarized tensor mask in range [0, 1]
-
-        """
-
-        img = 500*(img - ((1/255)*(255 + thr) - 1))
-        mask = tf.math.sigmoid(img)
-        return mask
-    
-    def random_flip(A):
-        """Applies vertcal flip wit 50% probability and horizontal flip 
-           with probability 10%.
-
-        Args:
-            A: Tensor image.
-
-        Returns:
-            Flipped tensor image.
-
-        """
-
-        if randint(0, 1):
-            A = tf.image.flip_left_right(A)
-        if randint(0, 9) == 9:
-            A = tf.image.flip_up_down(A)
-        return A
-
-    def background_addition(A):
-        """Blends tools A on a random background.
-
-        Args:
-            A: Tensor tools image with black backgound.
-
-        Returns:
-            Tensor image with tools blended on a surgical background.
-
-        """
-
-        background = random_background(args.backgrounds_dir)
-        mask = binarize_img(A, 5)
-        return tf.math.add(tf.math.multiply(A, mask), tf.math.multiply(background, 1 - mask))
-
-    def generate_masks(foreground_mask):
-        """Produces neighbor and backgrund masks from a tools mask.
-
-        Args:
-            foreground_mask: binary tensor mask.
-
-        Returns:
-            neighbor_mask: binary tensor mask of the neighbors of the input mask.
-
-            background_mask: binary tensor mask of the background of the input mask.
-
-        """
-
-        filtered_mask = tfa.image.mean_filter2d(foreground_mask, args.neighbor_kernel_size, 'SYMMETRIC')
-        background_mask = 1 - binarize_mask(filtered_mask, 5)
-        neighbor_mask = 1 - background_mask - foreground_mask
-        return neighbor_mask, background_mask
     
     # Compute SS loss
     def sim_segmentation_loss(foreground_A, att_A):
@@ -424,14 +314,14 @@ def train(args):
         
         # SS Loss with constrained background
         if args.attention_background_constraint:
-            neighbor_A, background_A = generate_masks(foreground_A)
+            neighbor_A, background_A = generate_masks(foreground_A, args)
             bin_mask = binarize_mask(att_A, args.ss_attention_thr)
             att_A_ = tf.math.multiply(1 - neighbor_A, bin_mask)
             ss_loss = attention_loss_fn(foreground_A, att_A_)
             
         # SS Loss without constrained background
         else:
-            _, background_A = generate_masks(foreground_A)
+            _, background_A = generate_masks(foreground_A, args)
             bin_mask = binarize_mask(att_A, args.ss_attention_thr)
             att_A_ = tf.math.multiply(foreground_A, bin_mask)
             ss_loss = attention_loss_fn(foreground_A, att_A_)
@@ -454,7 +344,7 @@ def train(args):
         # Random flip the tool image, compute the foreground mask and add a random background
         A = random_flip(A)
         foreground_A = tf.image.rgb_to_grayscale(binarize_img(A, 5))
-        A = background_addition(A)
+        A = background_addition(A, args)
 
         # Train generators and attention modules for 1 step
         A2B, B2A = train_G(A, B, foreground_A, ep)
@@ -550,10 +440,10 @@ def train(args):
                 train_step(A, B, ep)
                 
                 # sample
-                if G_optimizer_A_att.iterations.numpy() % 219 == 0:
+                if G_optimizer_A_att.iterations.numpy() % 2 == 0:
                     A, B = next(test_iter)
                     
-                    A = background_addition(A)
+                    A = background_addition(A, args)
 
                     A, B, A2B, B2A, A2B2A, B2A2B, att_A, att_B, att_A2B, att_B2A = sample(A, B)
                     
@@ -598,9 +488,9 @@ if __name__ == '__main__':
     py.arg('--adversarial_loss_mode', default='lsgan', choices=['gan', 'hinge_v1', 'hinge_v2', 'lsgan', 'wgan'])
     py.arg('--gradient_penalty_mode', default='none', choices=['none', 'dragan', 'wgan-gp'])
     py.arg('--gradient_penalty_weight', type=float, default=0.0) # hyperparam. to weight gradient pealty
-    py.arg('--adversarial_loss_weight', type=float, default=[1.0, 1.0]) # hyperparam. to weight adversarial loss
-    py.arg('--cycle_loss_weight', type=float, default=[0.5, 10.0]) # hyperparam. to weight cycle loss
-    py.arg('--ssim_loss_weight', type=float, default=[0.5, 10.0]) # hyperparam. to weight structure similarity loss
+    py.arg('--adversarial_loss_weight', type=tuple, default=(1.0, 1.0)) # hyperparam. to weight adversarial loss
+    py.arg('--cycle_loss_weight', type=tuple, default=(0.5, 10.0)) # hyperparam. to weight cycle loss
+    py.arg('--ssim_loss_weight', type=tuple, default=(0.5, 10.0)) # hyperparam. to weight structure similarity loss
     py.arg('--attention_weight', type=float, default=1.0) # hyperparam. to weight Attention Similarity loss
     py.arg('--sim_supervision_weight', type=float, default=2.0) # hyperparam. to weight Simulation Supervision loss
     py.arg('--ss_attention_thr', type=int, default=25) # threshold to binarize attention maps in SS loss

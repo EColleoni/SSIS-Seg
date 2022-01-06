@@ -2,19 +2,15 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 import sys
-sys.path.insert(1, 'sim2real/utils')
+sys.path.insert(1, '/home/ema/my_workspace/codes/SSIS-Seg/utils')
 
-import numpy as np
 import pylib as py
 import tensorflow as tf
 import tqdm
 import cv2
-import copy
 import h5py
 
-import module_spectral as module
-from sim2real_segmentation_model import model_Unet_sim2real
-from segmentation_models.losses import bce_jaccard_loss
+from utils import create_path
 
 
 def predict(args):
@@ -61,6 +57,9 @@ def predict(args):
     # predict
     len_test_set = len(os.listdir(args.dataset_dir + '/fold'))
     t = tqdm.tqdm(range(int(len_test_set/args.batch_size)))
+
+    create_path(args.save_dir)
+
     idx = 0
 
     for _ in t:
@@ -75,7 +74,7 @@ def predict(args):
 
 
 py.arg('--dataset_dir', default='/home/ema/my_workspace/datasets/dataset_simulation/UCL/train/imgs') # dataset directory
-py.arg('--model_dir', default='/home/ema/my_workspace/output_seg/models/model_003.h5') # path to the prediction model
+py.arg('--model_dir', default='/home/ema/my_workspace/output_seg/models/model_000.h5') # path to the prediction model
 py.arg('--save_dir', default='/home/ema/my_workspace/output_seg/df') # directory where to save data
 py.arg('--load_size', type=int, default=[512, 512])  # load image to this size
 py.arg('--batch_size', type=int, default=8) # batch size
