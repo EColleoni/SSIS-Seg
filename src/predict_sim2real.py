@@ -2,7 +2,8 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"]="2"
 
 import sys
-sys.path.insert(1, '/home/ema/my_workspace/codes/SSIS-Seg/utils')
+from os.path import dirname, abspath
+sys.path.insert(1, os.path.join(dirname(dirname(abspath(__file__) )), "utils"))
 
 import imlib as im
 import numpy as np
