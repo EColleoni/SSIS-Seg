@@ -5,7 +5,6 @@ import sys
 from os.path import dirname, abspath
 sys.path.insert(1, os.path.join(dirname(dirname(abspath(__file__) )), "utils"))
 
-import imlib as im
 import numpy as np
 import pylib as py
 import tensorflow as tf

@@ -441,7 +441,7 @@ def train(args):
                 train_step(A, B, ep)
                 
                 # sample
-                if G_optimizer_A_att.iterations.numpy() % 2 == 0:
+                if G_optimizer_A_att.iterations.numpy() % 480 == 0:
                     A, B = next(test_iter)
                     
                     A = background_addition(A, args)

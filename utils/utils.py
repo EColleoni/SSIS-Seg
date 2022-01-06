@@ -1,11 +1,36 @@
 import os
 import cv2
 import tensorflow as tf
+from tensorflow.python.ops.gen_array_ops import shape
 import tensorflow_addons as tfa
 
 from random import randrange, randint
 
 # Useful functions used across training and testing scripts
+
+def manage_batch_size_tf(func):
+    def wrapper(input, *args):
+        input_shape = shape(input)
+        input_shape = input_shape.numpy()
+        assert len(input_shape) == 4
+
+        if input_shape[0] == 1:
+            return func(input, *args)
+        
+        elif input_shape[0] > 1:
+            results = [func(tf.expand_dims(input[n], axis=0), *args) for n in range(input_shape[0])]
+            results = list(map(list, zip(*results)))
+            results = [tf.stack(results[n]) for n in range(len(results))]
+
+            if len(results) > 1:
+                return tuple(results)
+            else:
+                return results[0]
+
+        else:
+            print("Invalid shape for the input")
+
+    return wrapper
 
 def create_path(path):
     if not os.path.exists(path):
@@ -69,6 +94,7 @@ def binarize_mask(img, thr):
     mask = tf.math.sigmoid(img)
     return mask
 
+@manage_batch_size_tf
 def random_flip(A):
     """Applies vertcal flip wit 50% probability and horizontal flip 
         with probability 10%.
@@ -87,6 +113,7 @@ def random_flip(A):
         A = tf.image.flip_up_down(A)
     return A
 
+@manage_batch_size_tf
 def background_addition(A, args):
     """Blends tools A on a random background.
 
