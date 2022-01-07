@@ -9,6 +9,10 @@ from random import randrange, randint
 # Useful functions used across training and testing scripts
 
 def manage_batch_size_tf(func):
+    """Wrapper to run a function that was designed for an
+        input with batch size 1 over all Tensors.
+    """
+
     def wrapper(input, *args):
         input_shape = shape(input)
         input_shape = input_shape.numpy()
