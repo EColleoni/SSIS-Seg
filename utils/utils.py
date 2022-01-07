@@ -35,7 +35,7 @@ def manage_batch_size_tf(func):
 def create_path(path):
     if not os.path.exists(path):
         os.makedirs(path)
-    return
+    return path
 
 def random_background(backgrounds_path, args):    
     """Picks a random background from the specified

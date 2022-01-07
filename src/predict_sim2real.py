@@ -26,7 +26,6 @@ def predict(args):
     """
 
     output_dir = args.save_dir
-    create_path(output_dir)
 
     # ==============================================================================
     # =                                    data                                    =
@@ -54,6 +53,10 @@ def predict(args):
     for A, _ in tqdm.tqdm(dataset_test, desc='Inner Epoch Loop', total=len_dataset):
   
         #Predict
+        if args.save_with_gt:
+            gt = binarize_img(A, thr=1)
+            gt = gt.numpy() * 255
+
         A = background_addition(A, args)
         A2B_ = generator_A2B(A)
         att_A = attention_A(A)
@@ -68,8 +71,15 @@ def predict(args):
         A2B = np.uint8((A2B + 1) * (255/2))
         
         for n in range(args.batch_size):
-            cv2.imwrite(os.path.join(output_dir, f'img-%09d.{args.img_format}' % i), cv2.cvtColor(A2B[n, ], cv2.COLOR_RGB2BGR))
-            i += 1
+            if args.save_with_gt:
+                A2B[n, ] = cv2.cvtColor(A2B[n, ], cv2.COLOR_RGB2BGR)
+                cv2.imwrite(py.join(create_path(py.join(output_dir, 'imgs')), f'img-%09d.{args.img_format}' % i), A2B[n, ])
+                cv2.imwrite(py.join(create_path(py.join(output_dir, 'gt')), f'img-%09d.{args.img_format}' % i), gt[n, ])
+                i += 1
+            else:
+                A2B[n, ] = cv2.cvtColor(A2B[n, ], cv2.COLOR_RGB2BGR)
+                cv2.imwrite(py.join(create_path(py.join(output_dir, 'imgs')), f'img-%09d.{args.img_format}' % i), A2B[n, ])
+                i += 1
 
 if __name__ == '__main__':
     
@@ -82,6 +92,7 @@ if __name__ == '__main__':
     py.arg('--crop_size', type=int, default=512)  # then crop to this size
     py.arg('--batch_size', type=int, default=8) # batch size
     py.arg('--img_format', default='png') # format to save synthetic images
+    py.arg('--save_with_gt', type=bool, default=True) # save images with tools' binary gt 
     args = py.args()
 
     predict(args)
