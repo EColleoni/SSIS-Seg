@@ -1,18 +1,20 @@
 import os
 import cv2
 import tensorflow as tf
-from tensorflow.python.ops.gen_array_ops import shape
 import tensorflow_addons as tfa
 
+from tensorflow.python.ops.gen_array_ops import shape
 from random import randrange, randint
+from functools import wraps
 
 # Useful functions used across training and testing scripts
 
 def manage_batch_size_tf(func):
-    """Wrapper to run a function that was designed for an
-        input with batch size 1 over all Tensors.
+    """Wrapper to generalize a function that was designed for an
+        input with batch size 1 to Tensors wth batch size > 1.
     """
 
+    @wraps(func)
     def wrapper(input, *args):
         input_shape = shape(input)
         input_shape = input_shape.numpy()
