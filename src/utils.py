@@ -6,6 +6,8 @@ import tensorflow_addons as tfa
 from tensorflow.python.ops.gen_array_ops import shape
 from random import randrange, randint
 from functools import wraps
+from cProfile import Profile
+from pstats import Stats
 
 # Useful functions used across training and testing scripts
 
@@ -152,3 +154,13 @@ def generate_masks(foreground_mask, args):
     background_mask = 1 - binarize_mask(filtered_mask, 5)
     neighbor_mask = 1 - background_mask - foreground_mask
     return neighbor_mask, background_mask
+
+def func_stats(func, *args):
+    profiler = Profile()
+    profiler.runcall(lambda: func(*args))
+
+    stats = Stats(profiler)
+    stats.strip_dirs()
+    stats.sort_stats('cumulative')
+    stats.reverse_order()
+    stats.print_stats()
